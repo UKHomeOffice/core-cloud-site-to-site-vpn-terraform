@@ -1,3 +1,8 @@
+data "aws_availability_zones" "available" {}
+
+data "aws_region" "current" {}
+
+
 ##################################
 # Fetch VPC ID based on its Name tag
 ##################################
@@ -14,10 +19,6 @@ data "aws_vpc" "selected" {
 }
 
 
-
-data "aws_availability_zones" "available" {}
-
-data "aws_region" "current" {}
 
 data "aws_vpc_endpoint" "s3" {
   vpc_id       = data.aws_vpc.selected.id
