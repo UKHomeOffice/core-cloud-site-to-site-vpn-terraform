@@ -1,3 +1,8 @@
+data "aws_availability_zones" "available" {}
+
+data "aws_region" "current" {}
+
+
 ##################################
 # Fetch VPC ID based on its Name tag
 ##################################
@@ -15,16 +20,12 @@ data "aws_vpc" "selected" {
 
 
 
-data "aws_availability_zones" "available" {}
-
-data "aws_region" "current" {}
-
 data "aws_vpc_endpoint" "s3" {
   vpc_id       = data.aws_vpc.selected.id
-  service_name = "com.amazonaws.${data.aws_region.current.name}.s3"
+  service_name = "com.amazonaws.${data.aws_region.current.id}.s3"
 }
 
 data "aws_vpc_endpoint" "dynamodb" {
   vpc_id       = data.aws_vpc.selected.id
-  service_name = "com.amazonaws.${data.aws_region.current.name}.dynamodb"
+  service_name = "com.amazonaws.${data.aws_region.current.id}.dynamodb"
 }
