@@ -1,12 +1,7 @@
-####
-# NOT IN USE - Vijay Jadhav - Only use if Specific passwords were agreed for the VPN connections with Tenant
-#####
-
 
 ## Create a VPN Gateway only
 resource "aws_vpn_gateway" "vpn_gateway" {
-  vpc_id = data.aws_vpc.selected.id
-
+  # vpc_id is not set here on newer providers; attach below via aws_vpn_gateway_attachment
   tags = merge(
     {
       Name = "vpn-gateway-${var.environment_type}"
@@ -15,12 +10,18 @@ resource "aws_vpn_gateway" "vpn_gateway" {
   )
 }
 
+## Attach the VPN Gateway to the VPC
+resource "aws_vpn_gateway_attachment" "vgw_attach" {
+  vpc_id         = data.aws_vpc.selected.id
+  vpn_gateway_id = aws_vpn_gateway.vpn_gateway.id
+}
+
 
 
 ## Create a customer gateway
 resource "aws_customer_gateway" "customer_gateway" {
   bgp_asn    = 65001
-  ip_address = var.customer_gateway_ip
+  ip_address = var.customer_gateway_ipaddress
   type       = "ipsec.1"
 
   tags = merge(
@@ -30,6 +31,12 @@ resource "aws_customer_gateway" "customer_gateway" {
     var.tags
   )
 }
+
+
+locals {
+  firsvpn = jsondecode(data.aws_secretsmanager_secret_version.firsvpn.secret_string)
+}
+
 
 ## Create an actual vpn connection
 resource "aws_vpn_connection" "vpn_connection" {
@@ -42,28 +49,29 @@ resource "aws_vpn_connection" "vpn_connection" {
   tunnel2_ike_versions                 = ["ikev2"]
   tunnel1_phase1_encryption_algorithms = ["AES256-GCM-16"]
   tunnel2_phase1_encryption_algorithms = ["AES256-GCM-16"]
-  tunnel1_phase1_integrity_algorithms  = ["SHA2-256"]
-  tunnel2_phase1_integrity_algorithms  = ["SHA2-256"]
+  tunnel1_phase1_integrity_algorithms  = ["SHA2-512"]
+  tunnel2_phase1_integrity_algorithms  = ["SHA2-512"]
   tunnel1_phase2_encryption_algorithms = ["AES256-GCM-16"]
   tunnel2_phase2_encryption_algorithms = ["AES256-GCM-16"]
-  tunnel1_phase2_integrity_algorithms  = ["SHA2-256"]
-  tunnel2_phase2_integrity_algorithms  = ["SHA2-256"]
+  tunnel1_phase2_integrity_algorithms  = ["SHA2-512"]
+  tunnel2_phase2_integrity_algorithms  = ["SHA2-512"]
 
   tunnel1_phase1_lifetime_seconds      = 28800
   tunnel2_phase1_lifetime_seconds      = 28800
   tunnel1_phase2_lifetime_seconds      = 3600
   tunnel2_phase2_lifetime_seconds      = 3600
-  tunnel1_phase1_dh_group_numbers      = [19]
-  tunnel2_phase1_dh_group_numbers      = [19]
-  tunnel1_phase2_dh_group_numbers      = [19]
-  tunnel2_phase2_dh_group_numbers      = [19]
+  tunnel1_phase1_dh_group_numbers      = [21]
+  tunnel2_phase1_dh_group_numbers      = [21]
+  tunnel1_phase2_dh_group_numbers      = [21]
+  tunnel2_phase2_dh_group_numbers      = [21]
   tunnel1_startup_action               = "start"
   tunnel2_startup_action               = "start"
   tunnel1_dpd_timeout_action           = "clear"
   tunnel2_dpd_timeout_action           = "clear"
-  # leave the PreShared-Keys commented out : read the "READ THIS" comment below
-  # tunnel1_preshared_key                = data.aws_kms_secrets.interpol_prod_tunnel1.plaintext["password"]
-  # tunnel2_preshared_key                = data.aws_kms_secrets.interpol_prod_tunnel2.plaintext["password"]
+  # Use the plaintext read from Secrets Manager
+  tunnel1_preshared_key = local.firsvpn.tunnel1_preshared_key
+  tunnel2_preshared_key = local.firsvpn.tunnel2_preshared_key
+
   tunnel1_dpd_timeout_seconds       = 30
   tunnel2_dpd_timeout_seconds       = 30
   tunnel1_rekey_fuzz_percentage     = 100
@@ -72,18 +80,18 @@ resource "aws_vpn_connection" "vpn_connection" {
   tunnel2_rekey_margin_time_seconds = 540
   tunnel1_replay_window_size        = 1024
   tunnel2_replay_window_size        = 1024
-  # the inside CIDRs are the ones currently used for the Tenant prod IPSec connection
-  # we can't specify them in this object as they would re-create the vpn connection (and
-  # therefore re-assign new external IP addresses, which isn't good as Tenant would have to
-  # change their VPN device's configuration)
-  # don't delete them the 2 comments below in case we need to create a new VPN connection
-  # with similar attributes to the previous one: re-using the inside CIDRs will mean less
-  # re-configuration on the Tenant side
-  # tunnel1_inside_cidr               = "169.254.64.12/30"
-  # tunnel2_inside_cidr               = "169.254.65.160/30"
 
-  tags = var.tags
+
+    tags = merge(
+    {
+      Name = "vpn-${var.environment_type}"
+    },
+    var.tags
+  )
+  # Ensure VGW is attached before creating the connection
+  depends_on = [aws_vpn_gateway_attachment.vgw_attach]
 }
+
 
 ## Add the static route to VPN
 resource "aws_vpn_connection_route" "vpn_connection_route" {
@@ -108,35 +116,9 @@ locals {
 # VGW routes: many destinations → many RTBs
 ################################
 resource "aws_route" "vgw_routes_multi" {
-  for_each = local.rtb_x_dest
-  depends_on = [aws_vpn_connection.vpn_connection]
+  for_each               = local.rtb_x_dest
+  depends_on             = [aws_vpn_connection.vpn_connection]
   route_table_id         = each.value.rtb
   destination_cidr_block = each.value.cidr
   gateway_id             = aws_vpn_gateway.vpn_gateway.id
 }
-
-
-# READ THIS
-#
-# Specific passwords were agreed for the VPN connections with Tenant.
-# The passwords were generated by AWS, obtained from the AWS Console and safely encrypted with KMS.
-# However, specifying the passwords confuses the terraform AWS provider which alway wants to re-create the resources.
-# So, to make sure that future updates to the VPN connection don't re-create it, we are no longer specifying the password.
-# Re-creating the connection would be really bad because new external IPs would be assigned automatically, which would
-# break the tunnels and need Tenant to update their configuration with the new IPs.
-#
-# READ THIS
-
-# data "aws_kms_secrets" "tunnel1" {
-#   secret {
-#     name    = "password"
-#     payload = "xx=="
-#   }
-# }
-
-# data "aws_kms_secrets" "tunnel2" {
-#   secret {
-#     name    = "password"
-#     payload = "xx=="
-#   }
-# }
