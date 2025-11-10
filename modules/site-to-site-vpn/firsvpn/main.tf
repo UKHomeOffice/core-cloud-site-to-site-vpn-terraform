@@ -81,6 +81,8 @@ resource "aws_vpn_connection" "vpn_connection" {
   tunnel1_replay_window_size        = 1024
   tunnel2_replay_window_size        = 1024
 
+  local_ipv4_network_cidr         = data.aws_vpc.selected.cidr_block
+  remote_ipv4_network_cidr        = "${var.remote_ipv4_network_cidr}"
 
     tags = merge(
     {

@@ -81,3 +81,12 @@ variable "firsvpn_secret_id" {
   type        = string
   description = "ARN or name of Secrets Manager secret containing tunnel PSKs"
 }
+
+################################
+# remote_ipv4_network_cidr
+################################
+
+variable "remote_ipv4_network_cidr" {
+  type        = string
+  description = "Remote Network CIDR"
+}
